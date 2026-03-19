@@ -257,8 +257,18 @@ class EmbeddingIndex(ABC):
                 )  # embedding dimension does not matter for mocking.
                 Settings.callback_manager = CallbackManager([token_counter])
             else:
-                api_base = os.environ.get('OPENAI_EMBED_URL')
-                embed_model = OpenAIEmbedding(model_name="text-embedding-3-large", api_base=api_base)
+                api_base = os.environ.get("OPENAI_EMBED_URL")
+                embed_api_key = os.environ.get("OPENAI_EMBED_API_KEY") or os.environ.get(
+                    "OPENAI_API_KEY"
+                )
+                embed_model_name = os.environ.get(
+                    "OPENAI_EMBED_MODEL", "text-embedding-3-large"
+                )
+                embed_model = OpenAIEmbedding(
+                    model_name=embed_model_name,
+                    api_base=api_base,
+                    api_key=embed_api_key,
+                )
             index = VectorStoreIndex.from_documents(documents, embed_model=embed_model)
             #index.storage_context.persist(persist_dir=persist_dir)
         else:

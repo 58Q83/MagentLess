@@ -98,9 +98,13 @@ export OPENAI_API_KEY=
 export OPENAI_BASE_URL=
 export OPENAI_MODEL=
 export OPENAI_EMBED_URL=
+export OPENAI_EMBED_API_KEY=
+export OPENAI_EMBED_MODEL=
 ```
 
-OPENAI_EMBED_URL is used for embedding retrieval. The default model is 'text-embedding-3-large', which can be modified in agentless/fl/Index.py.
+OPENAI_EMBED_URL is used for embedding retrieval.
+OPENAI_EMBED_API_KEY is optional. If not provided, OPENAI_API_KEY will be used.
+OPENAI_EMBED_MODEL is optional with default 'text-embedding-3-large'.
 
 Then modify './script/run.sh'.
 
@@ -143,4 +147,3 @@ If you find XXX useful for your research and applications, feel free to give us 
 
 ## 🏢 About [ByteDance Seed Team](https://team.doubao.com/)
 Founded in 2023, ByteDance Seed Team is dedicated to crafting the industry's most advanced AI foundation models. The team aspires to become a world-class research team and make significant contributions to the advancement of science and society.
-

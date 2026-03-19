@@ -16,6 +16,12 @@ import tree_sitter_typescript as tsts
 import tree_sitter_rust as tsrust
 
 repo_to_top_folder = {
+
+    # Def4CAE
+    "Open-Cascade-SAS/OCCT":"OCCT",
+    "mfem/mfem":"mfem",
+    "dealii/dealii":"dealii",
+    "OpenFOAM/OpenFOAM-dev": "OpenFOAM-dev",
     # Python
     "django/django": "django",
     "sphinx-doc/sphinx": "sphinx",
@@ -126,8 +132,10 @@ def clone_repo(repo_name, repo_playground):
         print("Repository cloned successfully.")
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while running git command: {e}")
+        raise
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+        raise
 
 
 def get_project_structure_from_scratch(
@@ -671,4 +679,3 @@ def create_structure(directory_path):
                 curr_struct[file_name] = {}
 
     return structure
-
