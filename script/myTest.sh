@@ -12,8 +12,8 @@ fi
 
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
 
-export TARGET_ID=dealii-1
-export FOLDER_NAME=dealii_smoke_test
+export TARGET_ID=OCCT-1
+export FOLDER_NAME=OCCT-1
 export SWEBENCH_LANG=cpp
 export DATASET=local_json
 export SPLIT=test

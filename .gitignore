@@ -19,6 +19,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Chat with llm
+Chat.md
+
 # Distribution / packaging
 .Python
 build/
