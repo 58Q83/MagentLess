@@ -7,6 +7,13 @@ import openai
 import tiktoken
 
 
+def _env_to_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def num_tokens_from_messages(message, model="gpt-3.5-turbo-0301"):
     """Returns the number of tokens used by a list of messages."""
     try:
@@ -29,7 +36,7 @@ def create_chatgpt_config(
     system_message: str = "You are a helpful assistant.",
     model: str = "gpt-3.5-turbo",
 ) -> Dict:
-    model = os.environ.get('OPENAI_MODEL')
+    model = os.environ.get("OPENAI_MODEL") or model
     if isinstance(message, list):
         config = {
             "model": model,
@@ -49,6 +56,15 @@ def create_chatgpt_config(
                 {"role": "user", "content": message},
             ],
         }
+
+    # MiniMax OpenAI-compatible endpoint can separate reasoning traces.
+    # Enabled by default on minimaxi endpoint; can be disabled via env.
+    base_url = os.environ.get("OPENAI_BASE_URL", "")
+    if "minimaxi.com" in base_url and _env_to_bool(
+        "OPENAI_REASONING_SPLIT", default=True
+    ):
+        config["extra_body"] = {"reasoning_split": True}
+
     return config
 
 

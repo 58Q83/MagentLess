@@ -1,4 +1,5 @@
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -8,6 +9,32 @@ from agentless.util.api_requests import (
     request_anthropic_engine,
     request_chatgpt_engine,
 )
+
+
+def _strip_think_blocks(text: str) -> str:
+    if not text:
+        return text
+    return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+
+def _message_content_to_text(message) -> str:
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                # OpenAI-compatible multi-part format: [{"type":"text","text":"..."}]
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    if content is None:
+        return ""
+    return str(content)
 
 
 class DecoderBase(ABC):
@@ -68,7 +95,9 @@ class OpenAIChatDecoder(DecoderBase):
             if ret:
                 trajs.append(
                     {
-                        "response": ret.choices[0].message.content,
+                        "response": _strip_think_blocks(
+                            _message_content_to_text(ret.choices[0].message)
+                        ),
                         "usage": {
                             "completion_tokens": ret.usage.completion_tokens,
                             "prompt_tokens": ret.usage.prompt_tokens,
@@ -349,7 +378,9 @@ class DeepSeekChatDecoder(DecoderBase):
             if ret:
                 trajs.append(
                     {
-                        "response": ret.choices[0].message.content,
+                        "response": _strip_think_blocks(
+                            _message_content_to_text(ret.choices[0].message)
+                        ),
                         "usage": {
                             "completion_tokens": ret.usage.completion_tokens,
                             "prompt_tokens": ret.usage.prompt_tokens,

@@ -123,9 +123,9 @@ def clone_repo(repo_name, repo_playground):
         subprocess.run(
             [
                 'cp',
+                '-r',
                 f'repo/{dir_name}',
                 f'{repo_playground}/{dir_name}',
-                '-r',
             ],
             check=True,
         )
