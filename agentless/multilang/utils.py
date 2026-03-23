@@ -32,7 +32,10 @@ def load_local_json():
 
 
 def end_with_ext(file_name):
+    # OpenFOAM and some C/C++ repos often use uppercase extensions (.C/.H).
+    # Match extensions case-insensitively to avoid dropping valid source files.
+    file_name_lower = file_name.lower()
     for ext in LANG_EXT:
-        if file_name.endswith(f'.{ext}'):
+        if file_name_lower.endswith(f".{ext.lower()}"):
             return True
     return False

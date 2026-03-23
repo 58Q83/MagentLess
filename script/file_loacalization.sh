@@ -18,7 +18,7 @@ export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
 #   FOLDER_NAME SWEBENCH_LANG PROJECT_FILE_LOC DATASET SPLIT NJ NUM_SETS
 export NJ="${NJ:-2}"
 export NUM_SETS="${NUM_SETS:-2}"
-export FOLDER_NAME="${FOLDER_NAME:-OCCT_gpt5.4mini}"
+export FOLDER_NAME="${FOLDER_NAME:-Openfoam_gpt5.4mini_v2}"
 export SWEBENCH_LANG="${SWEBENCH_LANG:-cpp}"
 export PROJECT_FILE_LOC="${PROJECT_FILE_LOC:-structure}"
 export DATASET="${DATASET:-local_json}"

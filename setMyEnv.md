@@ -12,3 +12,13 @@ export OPENAI_API_KEY="sk-T3nAv9I1nNIhxcIK0L1aMeRW0aqhcr1zCKMHDDntxLoKWL6g"
 export OPENAI_EMBED_URL="https://yunwu.ai/v1/embeddings"
 
 ```
+
+```shell
+python3 script/analysis/evaluate_localization_vs_gt.py \
+  --results_root results \
+  --gt_path data/Def4CAE/Def4CAE_26.2.28.json \
+  --output_dir results/analysis/localization_eval \
+  --topk 1 3 5 \
+  --function_denominator available
+
+```
