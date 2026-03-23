@@ -11,14 +11,15 @@ if [[ -f script/api_key.sh ]]; then
 fi
 
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+export PROJECT_FILE_LOC="${PROJECT_FILE_LOC:-structure}"
 
-export TARGET_ID=OCCT-1
-export FOLDER_NAME=OCCT-1
+export TARGET_ID=OCCT-2
+export FOLDER_NAME=EmbeddingCount
 export SWEBENCH_LANG=cpp
 export DATASET=local_json
 export SPLIT=test
 export NJ=1
-unset PROJECT_FILE_LOC
+export FILTER_TOP_N=100
 
 ./script/localization1.1.sh
 echo "l1.1 done"

@@ -1,7 +1,7 @@
 import json
 import re
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 
 from agentless.util.api_requests import (
     create_anthropic_config,
@@ -15,6 +15,36 @@ def _strip_think_blocks(text: str) -> str:
     if not text:
         return text
     return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+
+def _extract_think_blocks(text: str) -> str:
+    if not text:
+        return ""
+    thinks = [x.strip() for x in re.findall(r"<think>([\s\S]*?)</think>", text)]
+    thinks = [x for x in thinks if x]
+    return "\n\n".join(thinks)
+
+
+def _any_to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    if isinstance(value, dict):
+        text = value.get("text")
+        if isinstance(text, str):
+            return text
+    return str(value)
 
 
 def _message_content_to_text(message) -> str:
@@ -35,6 +65,38 @@ def _message_content_to_text(message) -> str:
     if content is None:
         return ""
     return str(content)
+
+
+def _extract_response_and_think(message) -> Tuple[str, str]:
+    response_text = _strip_think_blocks(_message_content_to_text(message))
+
+    think_parts = []
+
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict):
+                item_type = item.get("type")
+                text = item.get("text")
+                if (
+                    isinstance(item_type, str)
+                    and item_type.lower() in {"reasoning", "thinking", "analysis"}
+                    and isinstance(text, str)
+                    and text.strip()
+                ):
+                    think_parts.append(text.strip())
+
+    reasoning_text = _any_to_text(getattr(message, "reasoning_content", None)).strip()
+    if reasoning_text:
+        think_parts.append(reasoning_text)
+
+    think_in_content = _extract_think_blocks(_message_content_to_text(message)).strip()
+    if think_in_content:
+        think_parts.append(think_in_content)
+
+    # Keep insertion order while removing duplicates.
+    deduped = list(dict.fromkeys([x for x in think_parts if x]))
+    return response_text, "\n\n".join(deduped)
 
 
 class DecoderBase(ABC):
@@ -93,11 +155,13 @@ class OpenAIChatDecoder(DecoderBase):
         for _ in range(batch_size):
             ret = request_chatgpt_engine(config, self.logger)
             if ret:
+                response_text, response_think = _extract_response_and_think(
+                    ret.choices[0].message
+                )
                 trajs.append(
                     {
-                        "response": _strip_think_blocks(
-                            _message_content_to_text(ret.choices[0].message)
-                        ),
+                        "response": response_text,
+                        "response_think": response_think,
                         "usage": {
                             "completion_tokens": ret.usage.completion_tokens,
                             "prompt_tokens": ret.usage.prompt_tokens,
@@ -108,6 +172,7 @@ class OpenAIChatDecoder(DecoderBase):
                 trajs.append(
                     {
                         "response": "",
+                        "response_think": "",
                         "usage": {
                             "completion_tokens": 0,
                             "prompt_tokens": 0,
@@ -376,11 +441,13 @@ class DeepSeekChatDecoder(DecoderBase):
                 config, self.logger, base_url="https://api.deepseek.com"
             )
             if ret:
+                response_text, response_think = _extract_response_and_think(
+                    ret.choices[0].message
+                )
                 trajs.append(
                     {
-                        "response": _strip_think_blocks(
-                            _message_content_to_text(ret.choices[0].message)
-                        ),
+                        "response": response_text,
+                        "response_think": response_think,
                         "usage": {
                             "completion_tokens": ret.usage.completion_tokens,
                             "prompt_tokens": ret.usage.prompt_tokens,
@@ -391,6 +458,7 @@ class DeepSeekChatDecoder(DecoderBase):
                 trajs.append(
                     {
                         "response": "",
+                        "response_think": "",
                         "usage": {
                             "completion_tokens": 0,
                             "prompt_tokens": 0,

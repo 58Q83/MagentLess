@@ -206,6 +206,9 @@ class EmbeddingIndex(ABC):
     def filter_files(self, files):
         if self.filter_type == "given_files":
             given_files = self.kwargs["given_files"][: self.kwargs["filter_top_n"]]
+            if self.kwargs["filter_top_n"]:
+                count = self.kwargs["filter_top_n"]
+                print(f"++++++++++++++++++++++++\nset topN={count}")
             return given_files
         elif self.filter_type == "none":
             # all files are included
