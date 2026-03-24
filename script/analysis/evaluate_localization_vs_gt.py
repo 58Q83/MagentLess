@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """Evaluate defect localization outputs against Def4CAE ground truth.
 
-This script compares:
-1) File-level localization (`found_files`)
-2) Function-level localization (`found_related_locs`, function-only)
+Evaluation protocol:
+1) File-level single-file instances: Hit@Top-K (K from --topk)
+2) File-level multi-file instances: Coverage@K where K=--file_multi_topk
+3) Function-level single-function instances: Hit@Top-K (K from --topk)
+4) Function-level all instances: Coverage@K_i where K_i=ceil(factor * |GT_functions|)
 
-Metrics:
-- Top-1 / Top-3 / Top-5 hit rate
+Missing predictions are included and scored as 0.
 
 Outputs:
-- metrics_overall.csv / metrics_overall.json
-- metrics_by_project.csv
-- instance_level_hits.csv
-- figure_overall_topk.(png|pdf)
-- figure_project_file_level.(png|pdf)
-- figure_project_function_level.(png|pdf)
+- metrics_file_single_overall.csv
+- metrics_file_single_by_project.csv
+- metrics_function_single_overall.csv
+- metrics_function_single_by_project.csv
+- instance_level_detailed_metrics.csv
+- hist_file_multi_coverage_values.csv
+- hist_function_all_coverage_values.csv
+- figure_file_multi_coverage_hist_overall.(png|pdf)
+- figure_file_multi_coverage_hist_by_project.(png|pdf)
+- figure_function_all_coverage_hist_overall.(png|pdf)
+- figure_function_all_coverage_hist_by_project.(png|pdf)
 """
 
 from __future__ import annotations
@@ -59,6 +65,8 @@ def normalize_project_name(raw: str) -> str:
         return "OCCT"
     if token.startswith("mfem"):
         return "mfem"
+    if token.startswith("dealii") or token.startswith("deal.ii"):
+        return "dealii"
     return raw.strip()
 
 
@@ -70,6 +78,8 @@ def infer_project_from_instance_id(instance_id: str) -> str:
         return "OCCT"
     if iid.startswith("mfem-"):
         return "mfem"
+    if iid.startswith("dealii-"):
+        return "dealii"
     return "UNKNOWN"
 
 
@@ -79,6 +89,10 @@ def normalize_path(path: str) -> str:
 
 def normalize_method_name(name: str) -> str:
     s = re.sub(r"\s+", "", name.strip())
+    # Drop parameter list so "foo(int)" and "foo" can match.
+    if "(" in s:
+        s = s.split("(", 1)[0]
+    # Keep only unqualified basename so "A::B::foo" -> "foo".
     if "::" in s:
         s = s.split("::")[-1]
     return s
@@ -252,6 +266,13 @@ def compute_hits_for_topk(pred_list: Sequence, gt_set: Set, topk: Sequence[int])
     return res
 
 
+def compute_coverage(pred_list: Sequence, gt_set: Set, k: int) -> float:
+    if not gt_set:
+        return float("nan")
+    hit_count = len(set(pred_list[:k]) & gt_set)
+    return hit_count / len(gt_set)
+
+
 def safe_rate(num: int, den: int) -> float:
     if den <= 0:
         return float("nan")
@@ -283,52 +304,61 @@ def add_bar_labels(ax, bars) -> None:
         )
 
 
-def plot_overall_topk(
+def add_hist_count_labels(ax, counts, patches) -> None:
+    ymax = max([float(c) for c in counts], default=0.0)
+    ypad = max(0.2, 0.02 * ymax)
+    for c, patch in zip(counts, patches):
+        h = float(c)
+        if h <= 0:
+            continue
+        x = patch.get_x() + patch.get_width() / 2.0
+        ax.annotate(
+            f"{int(round(h))}",
+            xy=(x, h),
+            xytext=(0, 2),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    if ymax > 0:
+        ax.set_ylim(0, ymax + ypad)
+
+
+def write_csv(path: Path, rows: List[dict], fieldnames: Sequence[str]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def preferred_project_order(name: str) -> Tuple[int, str]:
+    preferred = {"OCCT": 0, "OpenFOAM": 1, "mfem": 2, "dealii": 3}
+    return (preferred.get(name, 99), name)
+
+
+def save_figure_split_formats(fig, output_dir: Path, filename_base: str) -> None:
+    png_dir = output_dir / "png"
+    pdf_dir = output_dir / "pdf"
+    png_dir.mkdir(parents=True, exist_ok=True)
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(png_dir / f"{filename_base}.png", bbox_inches="tight")
+    fig.savefig(pdf_dir / f"{filename_base}.pdf", bbox_inches="tight")
+
+
+def plot_hit_by_project(
     output_dir: Path,
+    filename_base: str,
+    title: str,
     topk: Sequence[int],
-    overall_rows: List[dict],
+    rows: List[dict],
 ) -> None:
-    level_map = {r["level"]: r for r in overall_rows}
-    file_rates = [100.0 * float(level_map["file"][f"hit@{k}"]) for k in topk]
-    func_rates = [100.0 * float(level_map["function"][f"hit@{k}"]) for k in topk]
-
-    set_plot_style()
-    fig, ax = plt.subplots(figsize=(8.4, 5.2), dpi=300)
-
-    x = list(range(len(topk)))
-    width = 0.35
-    bars1 = ax.bar([i - width / 2 for i in x], file_rates, width=width, label="File-Level")
-    bars2 = ax.bar([i + width / 2 for i in x], func_rates, width=width, label="Function-Level")
-    add_bar_labels(ax, bars1)
-    add_bar_labels(ax, bars2)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"Top-{k}" for k in topk])
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("Hit Rate (%)")
-    ax.set_title("Overall Defect Localization Hit Rate")
-    ax.legend(frameon=True)
-    fig.tight_layout()
-
-    fig.savefig(output_dir / "figure_overall_topk.png", bbox_inches="tight")
-    fig.savefig(output_dir / "figure_overall_topk.pdf", bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_project_level(
-    output_dir: Path,
-    topk: Sequence[int],
-    by_project_rows: List[dict],
-    level: str,
-) -> None:
-    assert level in {"file", "function"}
-    rows = [r for r in by_project_rows if r["level"] == level]
     if not rows:
-        warn(f"No rows found for level={level}, skip plotting.")
+        warn(f"No rows for {filename_base}, skip plotting.")
         return
 
-    preferred_order = {"OCCT": 0, "OpenFOAM": 1, "mfem": 2}
-    rows = sorted(rows, key=lambda r: (preferred_order.get(r["project"], 99), r["project"]))
+    rows = sorted(rows, key=lambda r: preferred_project_order(r["project"]))
     projects = [r["project"] for r in rows]
     x = list(range(len(projects)))
 
@@ -347,28 +377,86 @@ def plot_project_level(
     ax.set_xticklabels(projects)
     ax.set_ylim(0, 100)
     ax.set_ylabel("Hit Rate (%)")
-    if level == "file":
-        ax.set_title("Project-Wise File-Level Hit Rate")
-    else:
-        title = "Project-Wise Function-Level Hit Rate"
-        n_text = " | ".join(
-            [f'{r["project"]}: N={r["evaluated_n"]}/{r["total_gt_n"]}' for r in rows]
-        )
-        ax.set_title(f"{title}\n({n_text})", fontsize=11)
+    subtitle = " | ".join([f'{r["project"]}: N={r["evaluated_n"]}' for r in rows])
+    ax.set_title(f"{title}\n({subtitle})", fontsize=11)
     ax.legend(frameon=True, ncol=len(topk))
     fig.tight_layout()
 
-    fig.savefig(output_dir / f"figure_project_{level}_level.png", bbox_inches="tight")
-    fig.savefig(output_dir / f"figure_project_{level}_level.pdf", bbox_inches="tight")
+    save_figure_split_formats(fig, output_dir, filename_base)
     plt.close(fig)
 
 
-def write_csv(path: Path, rows: List[dict], fieldnames: Sequence[str]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+def plot_coverage_hist_overall(
+    output_dir: Path,
+    filename_base: str,
+    title: str,
+    values: List[float],
+    bins: int,
+) -> None:
+    if not values:
+        warn(f"No values for {filename_base}, skip plotting.")
+        return
+
+    set_plot_style()
+    fig, ax = plt.subplots(figsize=(8.4, 5.2), dpi=300)
+    counts, _, patches = ax.hist(values, bins=bins, range=(0.0, 1.0), edgecolor="black", alpha=0.85)
+    add_hist_count_labels(ax, counts, patches)
+    ax.set_xlabel("Coverage")
+    ax.set_ylabel("Instance Count")
+    ax.set_title(f"{title}\n(N={len(values)})")
+    ax.set_xlim(0, 1)
+    fig.tight_layout()
+
+    save_figure_split_formats(fig, output_dir, filename_base)
+    plt.close(fig)
+
+
+def plot_coverage_hist_by_project(
+    output_dir: Path,
+    filename_base: str,
+    title: str,
+    values_by_project: Dict[str, List[float]],
+    bins: int,
+) -> None:
+    projects = sorted(values_by_project.keys(), key=preferred_project_order)
+    if not projects:
+        warn(f"No project values for {filename_base}, skip plotting.")
+        return
+
+    set_plot_style()
+    n = len(projects)
+    ncols = min(3, n)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5.6 * ncols, 3.8 * nrows), dpi=300)
+
+    if isinstance(axes, plt.Axes):
+        axes_list = [axes]
+    else:
+        axes_list = list(axes.ravel())
+
+    for ax, project in zip(axes_list, projects):
+        vals = values_by_project.get(project, [])
+        counts, _, patches = ax.hist(
+            vals,
+            bins=bins,
+            range=(0.0, 1.0),
+            edgecolor="black",
+            alpha=0.85,
+        )
+        add_hist_count_labels(ax, counts, patches)
+        ax.set_title(f"{project} (N={len(vals)})")
+        ax.set_xlim(0, 1)
+        ax.set_xlabel("Coverage")
+        ax.set_ylabel("Instance Count")
+
+    for ax in axes_list[len(projects):]:
+        ax.axis("off")
+
+    fig.suptitle(title, fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+
+    save_figure_split_formats(fig, output_dir, filename_base)
+    plt.close(fig)
 
 
 def evaluate(args: argparse.Namespace) -> None:
@@ -378,9 +466,20 @@ def evaluate(args: argparse.Namespace) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     topk = parse_topk(args.topk)
-    denominator_mode = args.function_denominator
-    info(f"Top-k = {topk}")
-    info(f"Function denominator mode = {denominator_mode}")
+    file_multi_topk = int(args.file_multi_topk)
+    if file_multi_topk <= 0:
+        raise ValueError("--file_multi_topk must be positive")
+    function_coverage_factor = float(args.function_coverage_factor)
+    if function_coverage_factor <= 0:
+        raise ValueError("--function_coverage_factor must be positive")
+    coverage_hist_bins = int(args.coverage_hist_bins)
+    if coverage_hist_bins <= 0:
+        raise ValueError("--coverage_hist_bins must be positive")
+
+    info(f"Hit Top-k = {topk}")
+    info(f"File multi coverage K = {file_multi_topk}")
+    info(f"Function coverage factor = {function_coverage_factor}")
+    info(f"Coverage histogram bins = {coverage_hist_bins}")
 
     gt_map = load_gt(gt_path)
     if not gt_map:
@@ -394,188 +493,337 @@ def evaluate(args: argparse.Namespace) -> None:
     if not result_dirs:
         raise RuntimeError(f"No valid result project directory found under: {results_root}")
 
-    all_projects = sorted(set(result_dirs.keys()) & set(gt_ids_by_project.keys()))
+    all_projects = sorted(set(result_dirs.keys()) & set(gt_ids_by_project.keys()), key=preferred_project_order)
     if not all_projects:
         raise RuntimeError("No overlap between result projects and GT projects.")
 
     info(f"Projects for evaluation: {', '.join(all_projects)}")
 
-    by_project_rows: List[dict] = []
-    instance_rows: List[dict] = []
+    # hit tables
+    file_single_by_project_hits: Dict[str, Dict[int, int]] = {p: {k: 0 for k in topk} for p in all_projects}
+    file_single_by_project_den: Dict[str, int] = {p: 0 for p in all_projects}
 
-    # These hold counts for overall (micro average).
-    overall_hits = {
-        "file": {k: 0 for k in topk},
-        "function": {k: 0 for k in topk},
-    }
-    overall_den = {"file": 0, "function": 0}
+    func_single_by_project_hits: Dict[str, Dict[int, int]] = {p: {k: 0 for k in topk} for p in all_projects}
+    func_single_by_project_den: Dict[str, int] = {p: 0 for p in all_projects}
+
+    # coverage value lists for histograms
+    file_multi_coverage_rows: List[dict] = []
+    func_all_coverage_rows: List[dict] = []
+
+    instance_rows: List[dict] = []
 
     unknown_instance_counter = 0
 
     for project in all_projects:
         proj_dir = result_dirs[project]
         file_pred_map = load_file_predictions(proj_dir / "file_level" / "loc_outputs.jsonl")
-        func_pred_map = load_function_predictions(
-            proj_dir / "related_elements" / "loc_outputs.jsonl"
-        )
+        func_pred_map = load_function_predictions(proj_dir / "related_elements" / "loc_outputs.jsonl")
 
-        # Warn instances in prediction not found in GT.
         for iid in set(file_pred_map.keys()) | set(func_pred_map.keys()):
             if iid not in gt_map:
                 unknown_instance_counter += 1
 
         project_gt_ids = sorted(gt_ids_by_project[project])
 
-        file_eval_ids = [iid for iid in project_gt_ids if iid in file_pred_map]
-        if not file_eval_ids:
-            warn(f"{project}: no file-level predictions matched GT.")
-
-        if denominator_mode == "all":
-            func_eval_ids = list(project_gt_ids)
-        else:
-            func_eval_ids = [iid for iid in project_gt_ids if iid in func_pred_map]
-        if not func_eval_ids:
-            warn(f"{project}: no function-level instances under denominator={denominator_mode}.")
-
-        # Per-project aggregated counters.
-        proj_file_hits = {k: 0 for k in topk}
-        proj_func_hits = {k: 0 for k in topk}
-
-        # Instance-level details.
         for iid in project_gt_ids:
             gt_inst = gt_map[iid]
             pred_files = file_pred_map.get(iid, [])
             pred_funcs = func_pred_map.get(iid, [])
 
-            file_has_pred = iid in file_pred_map
-            func_has_pred = iid in func_pred_map
-            file_included = file_has_pred
-            func_included = (iid in func_eval_ids)
+            gt_file_count = len(gt_inst.gt_files)
+            gt_func_count = len(gt_inst.gt_functions)
+
+            is_file_single = int(gt_file_count == 1)
+            is_file_multi = int(gt_file_count >= 2)
+            is_function_single = int(gt_func_count == 1)
+            is_function_multi = int(gt_func_count >= 2)
 
             file_hit_map: Dict[int, Optional[int]] = {k: None for k in topk}
             func_hit_map: Dict[int, Optional[int]] = {k: None for k in topk}
 
-            if file_included:
+            file_multi_coverage = None
+            func_all_k = None
+            func_all_coverage = None
+
+            # File single-hit metrics (include missing predictions as 0 by using default []).
+            if gt_file_count == 1:
                 hits = compute_hits_for_topk(pred_files, gt_inst.gt_files, topk)
+                file_single_by_project_den[project] += 1
                 for k in topk:
                     file_hit_map[k] = hits[k]
-                    proj_file_hits[k] += hits[k]
-                    overall_hits["file"][k] += hits[k]
-                overall_den["file"] += 1
+                    file_single_by_project_hits[project][k] += hits[k]
 
-            if func_included:
+            # File multi coverage@fixed K.
+            if gt_file_count >= 2:
+                file_multi_coverage = compute_coverage(pred_files, gt_inst.gt_files, file_multi_topk)
+                file_multi_coverage_rows.append(
+                    {
+                        "project": project,
+                        "instance_id": iid,
+                        "gt_count": gt_file_count,
+                        "k": file_multi_topk,
+                        "pred_count": len(pred_files),
+                        "coverage": file_multi_coverage,
+                    }
+                )
+
+            # Function single-hit metrics.
+            if gt_func_count == 1:
                 hits = compute_hits_for_topk(pred_funcs, gt_inst.gt_functions, topk)
+                func_single_by_project_den[project] += 1
                 for k in topk:
                     func_hit_map[k] = hits[k]
-                    proj_func_hits[k] += hits[k]
-                    overall_hits["function"][k] += hits[k]
-                overall_den["function"] += 1
+                    func_single_by_project_hits[project][k] += hits[k]
+
+            # Function multi-target coverage@dynamic K_i.
+            # Single-function instances are excluded by design.
+            if gt_func_count >= 2:
+                func_all_k = int(math.ceil(function_coverage_factor * gt_func_count))
+                func_all_coverage = compute_coverage(pred_funcs, gt_inst.gt_functions, func_all_k)
+                func_all_coverage_rows.append(
+                    {
+                        "project": project,
+                        "instance_id": iid,
+                        "gt_count": gt_func_count,
+                        "k": func_all_k,
+                        "pred_count": len(pred_funcs),
+                        "coverage": func_all_coverage,
+                        "is_function_single": is_function_single,
+                        "is_function_multi": is_function_multi,
+                    }
+                )
 
             row = {
                 "project": project,
                 "instance_id": iid,
-                "file_has_prediction": int(file_has_pred),
-                "function_has_prediction": int(func_has_pred),
-                "file_included": int(file_included),
-                "function_included": int(func_included),
+                "gt_file_count": gt_file_count,
+                "gt_function_count": gt_func_count,
+                "file_has_prediction": int(iid in file_pred_map),
+                "function_has_prediction": int(iid in func_pred_map),
                 "file_pred_count": len(pred_files),
                 "function_pred_count": len(pred_funcs),
+                "is_file_single": is_file_single,
+                "is_file_multi": is_file_multi,
+                "is_function_single": is_function_single,
+                "is_function_multi": is_function_multi,
+                f"file_multi_coverage@{file_multi_topk}": file_multi_coverage,
+                "function_all_dynamic_k": func_all_k,
+                "function_all_coverage@dynamic_k": func_all_coverage,
             }
             for k in topk:
-                row[f"file_hit@{k}"] = file_hit_map[k]
-                row[f"function_hit@{k}"] = func_hit_map[k]
+                row[f"file_single_hit@{k}"] = file_hit_map[k]
+                row[f"function_single_hit@{k}"] = func_hit_map[k]
             instance_rows.append(row)
-
-        # Project rows (file)
-        file_row = {
-            "project": project,
-            "level": "file",
-            "denominator_mode": "available",
-            "evaluated_n": len(file_eval_ids),
-            "total_gt_n": len(project_gt_ids),
-        }
-        for k in topk:
-            file_row[f"hit@{k}"] = safe_rate(proj_file_hits[k], len(file_eval_ids))
-        by_project_rows.append(file_row)
-
-        # Project rows (function)
-        func_row = {
-            "project": project,
-            "level": "function",
-            "denominator_mode": denominator_mode,
-            "evaluated_n": len(func_eval_ids),
-            "total_gt_n": len(project_gt_ids),
-        }
-        for k in topk:
-            func_row[f"hit@{k}"] = safe_rate(proj_func_hits[k], len(func_eval_ids))
-        by_project_rows.append(func_row)
 
     if unknown_instance_counter > 0:
         warn(f"{unknown_instance_counter} predicted instance_id(s) were not found in GT and skipped.")
 
-    # Overall metrics (micro average across evaluated instances).
-    overall_rows: List[dict] = []
-    for level in ("file", "function"):
-        den = overall_den[level]
+    # Build file single hit tables.
+    file_single_overall_row = {
+        "scope": "overall",
+        "evaluated_n": sum(file_single_by_project_den.values()),
+    }
+    for k in topk:
+        num = sum(file_single_by_project_hits[p][k] for p in all_projects)
+        den = file_single_overall_row["evaluated_n"]
+        file_single_overall_row[f"hit@{k}"] = safe_rate(num, den)
+
+    file_single_by_project_rows: List[dict] = []
+    for project in all_projects:
         row = {
-            "level": level,
-            "denominator_mode": ("available" if level == "file" else denominator_mode),
-            "evaluated_n": den,
+            "project": project,
+            "evaluated_n": file_single_by_project_den[project],
         }
         for k in topk:
-            row[f"hit@{k}"] = safe_rate(overall_hits[level][k], den)
-        overall_rows.append(row)
+            row[f"hit@{k}"] = safe_rate(
+                file_single_by_project_hits[project][k],
+                file_single_by_project_den[project],
+            )
+        file_single_by_project_rows.append(row)
 
-    # Monotonicity checks: Top-1 <= Top-3 <= Top-5 ...
-    for row in overall_rows:
+    # Build function single hit tables.
+    func_single_overall_row = {
+        "scope": "overall",
+        "evaluated_n": sum(func_single_by_project_den.values()),
+    }
+    for k in topk:
+        num = sum(func_single_by_project_hits[p][k] for p in all_projects)
+        den = func_single_overall_row["evaluated_n"]
+        func_single_overall_row[f"hit@{k}"] = safe_rate(num, den)
+
+    func_single_by_project_rows: List[dict] = []
+    for project in all_projects:
+        row = {
+            "project": project,
+            "evaluated_n": func_single_by_project_den[project],
+        }
+        for k in topk:
+            row[f"hit@{k}"] = safe_rate(
+                func_single_by_project_hits[project][k],
+                func_single_by_project_den[project],
+            )
+        func_single_by_project_rows.append(row)
+
+    # Monotonicity checks for hit tables.
+    for label, row in (
+        ("file_single_overall", file_single_overall_row),
+        ("function_single_overall", func_single_overall_row),
+    ):
         rates = [row[f"hit@{k}"] for k in topk]
         for i in range(len(rates) - 1):
             a = rates[i]
             b = rates[i + 1]
             if not (math.isnan(a) or math.isnan(b) or a <= b + 1e-12):
-                warn(f"Monotonicity check failed for overall {row['level']}: Top-{topk[i]} > Top-{topk[i+1]}")
+                warn(f"Monotonicity check failed for {label}: Top-{topk[i]} > Top-{topk[i+1]}")
 
-    # Save CSV/JSON
-    metric_fields = ["level", "denominator_mode", "evaluated_n"] + [f"hit@{k}" for k in topk]
-    write_csv(output_dir / "metrics_overall.csv", overall_rows, metric_fields)
+    # Save CSVs.
+    topk_fields = [f"hit@{k}" for k in topk]
+    write_csv(
+        output_dir / "metrics_file_single_overall.csv",
+        [file_single_overall_row],
+        ["scope", "evaluated_n"] + topk_fields,
+    )
+    write_csv(
+        output_dir / "metrics_file_single_by_project.csv",
+        file_single_by_project_rows,
+        ["project", "evaluated_n"] + topk_fields,
+    )
 
-    with (output_dir / "metrics_overall.json").open("w", encoding="utf-8") as f:
+    write_csv(
+        output_dir / "metrics_function_single_overall.csv",
+        [func_single_overall_row],
+        ["scope", "evaluated_n"] + topk_fields,
+    )
+    write_csv(
+        output_dir / "metrics_function_single_by_project.csv",
+        func_single_by_project_rows,
+        ["project", "evaluated_n"] + topk_fields,
+    )
+
+    instance_fields = [
+        "project",
+        "instance_id",
+        "gt_file_count",
+        "gt_function_count",
+        "file_has_prediction",
+        "function_has_prediction",
+        "file_pred_count",
+        "function_pred_count",
+        "is_file_single",
+        "is_file_multi",
+        "is_function_single",
+        "is_function_multi",
+    ] + [
+        f"file_single_hit@{k}" for k in topk
+    ] + [
+        f"function_single_hit@{k}" for k in topk
+    ] + [
+        f"file_multi_coverage@{file_multi_topk}",
+        "function_all_dynamic_k",
+        "function_all_coverage@dynamic_k",
+    ]
+    write_csv(output_dir / "instance_level_detailed_metrics.csv", instance_rows, instance_fields)
+
+    write_csv(
+        output_dir / "hist_file_multi_coverage_values.csv",
+        file_multi_coverage_rows,
+        ["project", "instance_id", "gt_count", "k", "pred_count", "coverage"],
+    )
+    write_csv(
+        output_dir / "hist_function_all_coverage_values.csv",
+        func_all_coverage_rows,
+        [
+            "project",
+            "instance_id",
+            "gt_count",
+            "k",
+            "pred_count",
+            "coverage",
+            "is_function_single",
+            "is_function_multi",
+        ],
+    )
+
+    # Plot hit-rate by project for single-file/single-function.
+    plot_hit_by_project(
+        output_dir=output_dir,
+        filename_base="figure_file_single_hit_by_project",
+        title="Project-Wise File Single-Target Hit Rate",
+        topk=topk,
+        rows=file_single_by_project_rows,
+    )
+    plot_hit_by_project(
+        output_dir=output_dir,
+        filename_base="figure_function_single_hit_by_project",
+        title="Project-Wise Function Single-Target Hit Rate",
+        topk=topk,
+        rows=func_single_by_project_rows,
+    )
+
+    # Coverage histograms.
+    file_multi_values = [float(r["coverage"]) for r in file_multi_coverage_rows if not math.isnan(float(r["coverage"]))]
+    func_all_values = [float(r["coverage"]) for r in func_all_coverage_rows if not math.isnan(float(r["coverage"]))]
+
+    file_multi_by_project: Dict[str, List[float]] = defaultdict(list)
+    for r in file_multi_coverage_rows:
+        cov = float(r["coverage"])
+        if not math.isnan(cov):
+            file_multi_by_project[r["project"]].append(cov)
+
+    func_all_by_project: Dict[str, List[float]] = defaultdict(list)
+    for r in func_all_coverage_rows:
+        cov = float(r["coverage"])
+        if not math.isnan(cov):
+            func_all_by_project[r["project"]].append(cov)
+
+    plot_coverage_hist_overall(
+        output_dir=output_dir,
+        filename_base="figure_file_multi_coverage_hist_overall",
+        title=f"File Multi-Target Coverage@{file_multi_topk} Distribution",
+        values=file_multi_values,
+        bins=coverage_hist_bins,
+    )
+    plot_coverage_hist_by_project(
+        output_dir=output_dir,
+        filename_base="figure_file_multi_coverage_hist_by_project",
+        title=f"File Multi-Target Coverage@{file_multi_topk} Distribution by Project",
+        values_by_project=file_multi_by_project,
+        bins=coverage_hist_bins,
+    )
+
+    plot_coverage_hist_overall(
+        output_dir=output_dir,
+        filename_base="figure_function_all_coverage_hist_overall",
+        title="Function Coverage@dynamic_k Distribution",
+        values=func_all_values,
+        bins=coverage_hist_bins,
+    )
+    plot_coverage_hist_by_project(
+        output_dir=output_dir,
+        filename_base="figure_function_all_coverage_hist_by_project",
+        title="Function Coverage@dynamic_k Distribution by Project",
+        values_by_project=func_all_by_project,
+        bins=coverage_hist_bins,
+    )
+
+    # Save a compact run-summary JSON for traceability.
+    with (output_dir / "metrics_summary.json").open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "topk": list(topk),
-                "function_denominator_mode": denominator_mode,
-                "metrics_overall": overall_rows,
+                "file_multi_topk": file_multi_topk,
+                "function_coverage_factor": function_coverage_factor,
+                "coverage_hist_bins": coverage_hist_bins,
+                "projects": all_projects,
+                "file_single_overall": file_single_overall_row,
+                "function_single_overall": func_single_overall_row,
+                "file_multi_hist_n": len(file_multi_values),
+                "function_all_hist_n": len(func_all_values),
             },
             f,
             ensure_ascii=False,
             indent=2,
         )
-
-    by_project_fields = [
-        "project",
-        "level",
-        "denominator_mode",
-        "evaluated_n",
-        "total_gt_n",
-    ] + [f"hit@{k}" for k in topk]
-    write_csv(output_dir / "metrics_by_project.csv", by_project_rows, by_project_fields)
-
-    instance_fields = [
-        "project",
-        "instance_id",
-        "file_has_prediction",
-        "function_has_prediction",
-        "file_included",
-        "function_included",
-        "file_pred_count",
-        "function_pred_count",
-    ] + [f"file_hit@{k}" for k in topk] + [f"function_hit@{k}" for k in topk]
-    write_csv(output_dir / "instance_level_hits.csv", instance_rows, instance_fields)
-
-    # Plots
-    plot_overall_topk(output_dir, topk, overall_rows)
-    plot_project_level(output_dir, topk, by_project_rows, level="file")
-    plot_project_level(output_dir, topk, by_project_rows, level="function")
 
     info(f"Saved outputs to: {output_dir.resolve()}")
 
@@ -607,17 +855,25 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         type=int,
         default=list(DEFAULT_TOPK),
-        help="Top-k values to evaluate, e.g. --topk 1 3 5",
+        help="Top-k values for hit-rate metrics, e.g. --topk 1 3 5",
     )
     parser.add_argument(
-        "--function_denominator",
-        choices=("available", "all"),
-        default="available",
-        help=(
-            "Function-level denominator mode. "
-            "'available': evaluate only instances with function outputs. "
-            "'all': evaluate all GT instances and treat missing outputs as miss."
-        ),
+        "--file_multi_topk",
+        type=int,
+        default=5,
+        help="K used for file multi-target coverage@K.",
+    )
+    parser.add_argument(
+        "--function_coverage_factor",
+        type=float,
+        default=1.5,
+        help="Dynamic-k factor for function coverage: K_i=ceil(factor * |GT_i|).",
+    )
+    parser.add_argument(
+        "--coverage_hist_bins",
+        type=int,
+        default=10,
+        help="Number of bins for coverage histograms in [0, 1].",
     )
     return parser
 

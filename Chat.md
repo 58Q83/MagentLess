@@ -1,8 +1,3 @@
 ```shell
-Done. total_rows=67, selected=67, generated=62, skipped_existing=0, failed=5
-dealii-11
-dealii-14
-dealii-15
-dealii-16
-dealii-17
+uv run python script/analysis/evaluate_localization_vs_gt.py --results_root results --gt_path data/Def4CAE/Def4CAE_26.2.28.json --output_dir /Users/8q5q7/Desktop/MagentOutput
 ```

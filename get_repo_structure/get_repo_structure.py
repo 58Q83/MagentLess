@@ -478,6 +478,9 @@ def parse_cpp_file(file_path, file_content=None):
     function_names = []
 
     def get_type(node: Node):
+        if node is None:
+            print("getNoneType in build cache")
+            return None
         if node.type == 'type_identifier':
             return node.text.decode('utf-8')
         elif node.type == 'template_type':
@@ -489,8 +492,13 @@ def parse_cpp_file(file_path, file_content=None):
             methods = []
             if file_path.endswith('.c'):
                 continue
+            class_name = get_type(node.child_by_field_name('name'))
+            if class_name is None:
+                # Anonymous class/struct (for example: typedef class {} alias;)
+                # does not have a "name" field in tree-sitter.
+                continue
             class_info.append({
-                'name': get_type(node.child_by_field_name('name')),
+                'name': class_name,
                 'start_line': node.start_point.row,
                 'end_line': node.end_point.row,
                 'text': node.text.decode('utf-8').splitlines(),
@@ -499,6 +507,9 @@ def parse_cpp_file(file_path, file_content=None):
             for child in traverse(node):
                 if child.type == 'function_definition':
                     name_node = child.child_by_field_name('declarator')
+                    if name_node is None:
+                        print("name = None checkpoint 1")
+                        continue
                     name_node = name_node.child_by_field_name('declarator')
                     if name_node is None:
                         continue
@@ -510,13 +521,16 @@ def parse_cpp_file(file_path, file_content=None):
                     })
         elif node.type == 'function_definition':
             name_node = node.child_by_field_name('declarator')
+            if name_node is None:
+                print("name = None checkpoint 2")
+                continue
             name_node = name_node.child_by_field_name('declarator')
             if name_node is None:
                 continue
 
             in_class = False
             tmp = node
-            while tmp != tree.root_node:
+            while tmp is not None and tmp != tree.root_node:
                 if tmp.type == 'class_specifier':
                     in_class = True
                     break
