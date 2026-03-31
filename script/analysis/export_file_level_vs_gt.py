@@ -106,7 +106,7 @@ def build_instance_row(instance_id: str, gt_files: Set[str], pred_files: List[st
         cut = pred[:k]
         hit = any(p in gt_set for p in cut)
         covered = len({p for p in cut if p in gt_set})
-        hit_at[f"hit@{k}"] = int(hit)
+        hit_at[f"Acc@{k}"] = int(hit)
         recall_at[f"recall@{k}"] = (covered / len(gt_set)) if gt_set else None
 
     return {

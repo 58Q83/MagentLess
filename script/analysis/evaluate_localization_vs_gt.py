@@ -2,9 +2,9 @@
 """Evaluate defect localization outputs against Def4CAE ground truth.
 
 Evaluation protocol:
-1) File-level single-file instances: Hit@Top-K (K from --topk)
+1) File-level single-file instances: Acc@Top-K (K from --topk)
 2) File-level multi-file instances: Coverage@K where K=--file_multi_topk
-3) Function-level single-function instances: Hit@Top-K (K from --topk)
+3) Function-level single-function instances: Acc@Top-K (K from --topk)
 4) Function-level all instances: Coverage@K_i where K_i=ceil(factor * |GT_functions|)
 
 Missing predictions are included and scored as 0.
@@ -30,6 +30,7 @@ import csv
 import json
 import math
 import re
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +38,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 
+useCombinedFileRes = True
 
+defaultFileResPath = os.path.join("file_level", "loc_outputs.jsonl")
+combinedFileResPath = os.path.join("file_level_combined", "combined_locs.jsonl")
 DEFAULT_TOPK = (1, 3, 5)
 
 
@@ -227,7 +231,10 @@ def discover_project_result_dirs(results_root: Path) -> Dict[str, Path]:
             continue
         raw_name = child.name.split("_", 1)[0]
         project = normalize_project_name(raw_name)
-        file_jsonl = child / "file_level" / "loc_outputs.jsonl"
+        file_jsonl = child / defaultFileResPath
+        if useCombinedFileRes:
+            # 若使用combined后的文件定位结果
+            file_jsonl = child / combinedFileResPath
         related_jsonl = child / "related_elements" / "loc_outputs.jsonl"
         if file_jsonl.exists() or related_jsonl.exists():
             mapping[project] = child
@@ -369,7 +376,7 @@ def plot_hit_by_project(
     offsets = [((i - (len(topk) - 1) / 2.0) * width) for i in range(len(topk))]
 
     for offset, k in zip(offsets, topk):
-        y = [100.0 * float(r[f"hit@{k}"]) for r in rows]
+        y = [100.0 * float(r[f"Acc@{k}"]) for r in rows]
         bars = ax.bar([xi + offset for xi in x], y, width=width, label=f"Top-{k}")
         add_bar_labels(ax, bars)
 
@@ -516,7 +523,11 @@ def evaluate(args: argparse.Namespace) -> None:
 
     for project in all_projects:
         proj_dir = result_dirs[project]
-        file_pred_map = load_file_predictions(proj_dir / "file_level" / "loc_outputs.jsonl")
+        tmp_file_path = proj_dir / defaultFileResPath
+        if useCombinedFileRes:
+            # 若使用融合结果
+            tmp_file_path = proj_dir / combinedFileResPath
+        file_pred_map = load_file_predictions(tmp_file_path)
         func_pred_map = load_function_predictions(proj_dir / "related_elements" / "loc_outputs.jsonl")
 
         for iid in set(file_pred_map.keys()) | set(func_pred_map.keys()):
@@ -578,7 +589,9 @@ def evaluate(args: argparse.Namespace) -> None:
             # Function multi-target coverage@dynamic K_i.
             # Single-function instances are excluded by design.
             if gt_func_count >= 2:
-                func_all_k = int(math.ceil(function_coverage_factor * gt_func_count))
+                # func_all_k = int(math.ceil(function_coverage_factor * gt_func_count))
+                # 1.5系数直接改成ACC@15
+                func_all_k = 15
                 func_all_coverage = compute_coverage(pred_funcs, gt_inst.gt_functions, func_all_k)
                 func_all_coverage_rows.append(
                     {
@@ -607,12 +620,12 @@ def evaluate(args: argparse.Namespace) -> None:
                 "is_function_single": is_function_single,
                 "is_function_multi": is_function_multi,
                 f"file_multi_coverage@{file_multi_topk}": file_multi_coverage,
-                "function_all_dynamic_k": func_all_k,
-                "function_all_coverage@dynamic_k": func_all_coverage,
+                "function_all_Acc@15": func_all_k,
+                "function_all_coverage Acc@15": func_all_coverage,
             }
             for k in topk:
-                row[f"file_single_hit@{k}"] = file_hit_map[k]
-                row[f"function_single_hit@{k}"] = func_hit_map[k]
+                row[f"file_single_Acc@{k}"] = file_hit_map[k]
+                row[f"function_single_Acc@{k}"] = func_hit_map[k]
             instance_rows.append(row)
 
     if unknown_instance_counter > 0:
@@ -626,7 +639,7 @@ def evaluate(args: argparse.Namespace) -> None:
     for k in topk:
         num = sum(file_single_by_project_hits[p][k] for p in all_projects)
         den = file_single_overall_row["evaluated_n"]
-        file_single_overall_row[f"hit@{k}"] = safe_rate(num, den)
+        file_single_overall_row[f"Acc@{k}"] = safe_rate(num, den)
 
     file_single_by_project_rows: List[dict] = []
     for project in all_projects:
@@ -635,7 +648,7 @@ def evaluate(args: argparse.Namespace) -> None:
             "evaluated_n": file_single_by_project_den[project],
         }
         for k in topk:
-            row[f"hit@{k}"] = safe_rate(
+            row[f"Acc@{k}"] = safe_rate(
                 file_single_by_project_hits[project][k],
                 file_single_by_project_den[project],
             )
@@ -649,7 +662,7 @@ def evaluate(args: argparse.Namespace) -> None:
     for k in topk:
         num = sum(func_single_by_project_hits[p][k] for p in all_projects)
         den = func_single_overall_row["evaluated_n"]
-        func_single_overall_row[f"hit@{k}"] = safe_rate(num, den)
+        func_single_overall_row[f"Acc@{k}"] = safe_rate(num, den)
 
     func_single_by_project_rows: List[dict] = []
     for project in all_projects:
@@ -658,7 +671,7 @@ def evaluate(args: argparse.Namespace) -> None:
             "evaluated_n": func_single_by_project_den[project],
         }
         for k in topk:
-            row[f"hit@{k}"] = safe_rate(
+            row[f"Acc@{k}"] = safe_rate(
                 func_single_by_project_hits[project][k],
                 func_single_by_project_den[project],
             )
@@ -669,7 +682,7 @@ def evaluate(args: argparse.Namespace) -> None:
         ("file_single_overall", file_single_overall_row),
         ("function_single_overall", func_single_overall_row),
     ):
-        rates = [row[f"hit@{k}"] for k in topk]
+        rates = [row[f"Acc@{k}"] for k in topk]
         for i in range(len(rates) - 1):
             a = rates[i]
             b = rates[i + 1]
@@ -677,7 +690,7 @@ def evaluate(args: argparse.Namespace) -> None:
                 warn(f"Monotonicity check failed for {label}: Top-{topk[i]} > Top-{topk[i+1]}")
 
     # Save CSVs.
-    topk_fields = [f"hit@{k}" for k in topk]
+    topk_fields = [f"Acc@{k}" for k in topk]
     write_csv(
         output_dir / "metrics_file_single_overall.csv",
         [file_single_overall_row],
@@ -714,13 +727,13 @@ def evaluate(args: argparse.Namespace) -> None:
         "is_function_single",
         "is_function_multi",
     ] + [
-        f"file_single_hit@{k}" for k in topk
+        f"file_single_Acc@{k}" for k in topk
     ] + [
-        f"function_single_hit@{k}" for k in topk
+        f"function_single_Acc@{k}" for k in topk
     ] + [
         f"file_multi_coverage@{file_multi_topk}",
-        "function_all_dynamic_k",
-        "function_all_coverage@dynamic_k",
+        "function_all_Acc@15",
+        "function_all_coverage Acc@15",
     ]
     write_csv(output_dir / "instance_level_detailed_metrics.csv", instance_rows, instance_fields)
 
@@ -794,14 +807,14 @@ def evaluate(args: argparse.Namespace) -> None:
     plot_coverage_hist_overall(
         output_dir=output_dir,
         filename_base="figure_function_all_coverage_hist_overall",
-        title="Function Coverage@dynamic_k Distribution",
+        title="Function Coverage@Acc@15 Distribution",
         values=func_all_values,
         bins=coverage_hist_bins,
     )
     plot_coverage_hist_by_project(
         output_dir=output_dir,
         filename_base="figure_function_all_coverage_hist_by_project",
-        title="Function Coverage@dynamic_k Distribution by Project",
+        title="Function Coverage@Acc@15 Distribution by Project",
         values_by_project=func_all_by_project,
         bins=coverage_hist_bins,
     )
@@ -841,7 +854,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gt_path",
         type=str,
-        default="data/Def4CAE/Def4CAE_26.2.28.json",
+        default="data/Def4CAE/filter.json",
         help="Ground-truth JSON path.",
     )
     parser.add_argument(
@@ -872,7 +885,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--coverage_hist_bins",
         type=int,
-        default=10,
+        default=20,
         help="Number of bins for coverage histograms in [0, 1].",
     )
     return parser

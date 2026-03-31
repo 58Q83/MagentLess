@@ -1,3 +1,10 @@
 ```shell
-uv run python script/analysis/evaluate_localization_vs_gt.py --results_root results --gt_path data/Def4CAE/Def4CAE_26.2.28.json --output_dir /Users/8q5q7/Desktop/MagentOutput
+File-Level Hit Rate
+Scope           Hit  Total     Hit Rate
+----------------------------------------
+overall          93    141       65.96%
+OCCT             12     17       70.59%
+OpenFOAM         48     88       54.55%
+mfem             18     19       94.74%
+dealii           15     17       88.24%
 ```

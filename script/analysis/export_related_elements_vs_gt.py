@@ -238,7 +238,7 @@ def build_level_block(pred_list: List[Tuple[str, str]], gt_list: List[Tuple[str,
 
     metrics = {}
     for k in topk:
-        metrics[f"hit@{k}"] = hit_map[k]
+        metrics[f"Acc@{k}"] = hit_map[k]
         metrics[f"recall@{k}"] = recall_map[k]
 
     return {
