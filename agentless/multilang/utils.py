@@ -26,6 +26,8 @@ def load_local_json():
     path = Path(f'data/{lang}')
     lines = []
     for file in path.iterdir():
+        if not file.name.endswith(".jsonl"):
+            continue
         lines.extend(file.read_text().splitlines())
     dataset = [process(x) for x in lines]
     return dataset

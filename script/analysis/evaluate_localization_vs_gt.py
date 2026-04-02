@@ -265,11 +265,12 @@ def load_function_predictions(path: Path) -> Dict[str, List[Tuple[str, str]]]:
     return out
 
 
-def compute_hits_for_topk(pred_list: Sequence, gt_set: Set, topk: Sequence[int]) -> Dict[int, int]:
+def compute_acc_for_topk(pred_list: Sequence, gt_set: Set, topk: Sequence[int]) -> Dict[int, int]:
     res: Dict[int, int] = {}
     for k in topk:
-        pred_cut = pred_list[:k]
-        res[k] = int(any(item in gt_set for item in pred_cut))
+        pred_cut_set = set(pred_list[:k])
+        # Acc@k: 1 iff all GT targets are covered by top-k predictions.
+        res[k] = int(gt_set.issubset(pred_cut_set))
     return res
 
 
@@ -377,13 +378,13 @@ def plot_hit_by_project(
 
     for offset, k in zip(offsets, topk):
         y = [100.0 * float(r[f"Acc@{k}"]) for r in rows]
-        bars = ax.bar([xi + offset for xi in x], y, width=width, label=f"Top-{k}")
+        bars = ax.bar([xi + offset for xi in x], y, width=width, label=f"Acc@{k}")
         add_bar_labels(ax, bars)
 
     ax.set_xticks(x)
     ax.set_xticklabels(projects)
     ax.set_ylim(0, 100)
-    ax.set_ylabel("Hit Rate (%)")
+    ax.set_ylabel("Accuracy (%)")
     subtitle = " | ".join([f'{r["project"]}: N={r["evaluated_n"]}' for r in rows])
     ax.set_title(f"{title}\n({subtitle})", fontsize=11)
     ax.legend(frameon=True, ncol=len(topk))
@@ -483,7 +484,7 @@ def evaluate(args: argparse.Namespace) -> None:
     if coverage_hist_bins <= 0:
         raise ValueError("--coverage_hist_bins must be positive")
 
-    info(f"Hit Top-k = {topk}")
+    info(f"Acc Top-k = {topk}")
     info(f"File multi coverage K = {file_multi_topk}")
     info(f"Function coverage factor = {function_coverage_factor}")
     info(f"Coverage histogram bins = {coverage_hist_bins}")
@@ -558,7 +559,7 @@ def evaluate(args: argparse.Namespace) -> None:
 
             # File single-hit metrics (include missing predictions as 0 by using default []).
             if gt_file_count == 1:
-                hits = compute_hits_for_topk(pred_files, gt_inst.gt_files, topk)
+                hits = compute_acc_for_topk(pred_files, gt_inst.gt_files, topk)
                 file_single_by_project_den[project] += 1
                 for k in topk:
                     file_hit_map[k] = hits[k]
@@ -580,7 +581,7 @@ def evaluate(args: argparse.Namespace) -> None:
 
             # Function single-hit metrics.
             if gt_func_count == 1:
-                hits = compute_hits_for_topk(pred_funcs, gt_inst.gt_functions, topk)
+                hits = compute_acc_for_topk(pred_funcs, gt_inst.gt_functions, topk)
                 func_single_by_project_den[project] += 1
                 for k in topk:
                     func_hit_map[k] = hits[k]
@@ -687,7 +688,7 @@ def evaluate(args: argparse.Namespace) -> None:
             a = rates[i]
             b = rates[i + 1]
             if not (math.isnan(a) or math.isnan(b) or a <= b + 1e-12):
-                warn(f"Monotonicity check failed for {label}: Top-{topk[i]} > Top-{topk[i+1]}")
+                warn(f"Monotonicity check failed for {label}: Acc@{topk[i]} > Acc@{topk[i+1]}")
 
     # Save CSVs.
     topk_fields = [f"Acc@{k}" for k in topk]
@@ -757,18 +758,18 @@ def evaluate(args: argparse.Namespace) -> None:
         ],
     )
 
-    # Plot hit-rate by project for single-file/single-function.
+    # Plot Acc@k by project for single-file/single-function.
     plot_hit_by_project(
         output_dir=output_dir,
         filename_base="figure_file_single_hit_by_project",
-        title="Project-Wise File Single-Target Hit Rate",
+        title="Project-Wise File Single-Target Acc@k",
         topk=topk,
         rows=file_single_by_project_rows,
     )
     plot_hit_by_project(
         output_dir=output_dir,
         filename_base="figure_function_single_hit_by_project",
-        title="Project-Wise Function Single-Target Hit Rate",
+        title="Project-Wise Function Single-Target Acc@k",
         topk=topk,
         rows=func_single_by_project_rows,
     )
@@ -868,7 +869,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         type=int,
         default=list(DEFAULT_TOPK),
-        help="Top-k values for hit-rate metrics, e.g. --topk 1 3 5",
+        help="Top-k values for Acc@k metrics, e.g. --topk 1 3 5",
     )
     parser.add_argument(
         "--file_multi_topk",

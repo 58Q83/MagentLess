@@ -99,6 +99,51 @@ def _extract_response_and_think(message) -> Tuple[str, str]:
     return response_text, "\n\n".join(deduped)
 
 
+def _safe_openai_like_to_traj(ret, logger) -> dict:
+    """Convert OpenAI-compatible response to traj dict safely.
+
+    Some OpenAI-compatible providers occasionally return a response object with
+    missing/empty choices. In that case, return an empty traj and log details
+    instead of raising and aborting the entire batch.
+    """
+    empty = {
+        "response": "",
+        "response_think": "",
+        "usage": {
+            "completion_tokens": 0,
+            "prompt_tokens": 0,
+        },
+    }
+
+    if not ret:
+        logger.warning("Empty API response object.")
+        return empty
+
+    choices = getattr(ret, "choices", None)
+    if not choices:
+        logger.error(f"Malformed API response: choices is empty or None. ret={ret}")
+        return empty
+
+    first_choice = choices[0]
+    message = getattr(first_choice, "message", None)
+    if message is None:
+        logger.error(f"Malformed API response: first choice has no message. ret={ret}")
+        return empty
+
+    response_text, response_think = _extract_response_and_think(message)
+    usage = getattr(ret, "usage", None)
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    return {
+        "response": response_text,
+        "response_think": response_think,
+        "usage": {
+            "completion_tokens": completion_tokens,
+            "prompt_tokens": prompt_tokens,
+        },
+    }
+
+
 class DecoderBase(ABC):
     def __init__(
         self,
@@ -154,31 +199,7 @@ class OpenAIChatDecoder(DecoderBase):
         trajs = []
         for _ in range(batch_size):
             ret = request_chatgpt_engine(config, self.logger)
-            if ret:
-                response_text, response_think = _extract_response_and_think(
-                    ret.choices[0].message
-                )
-                trajs.append(
-                    {
-                        "response": response_text,
-                        "response_think": response_think,
-                        "usage": {
-                            "completion_tokens": ret.usage.completion_tokens,
-                            "prompt_tokens": ret.usage.prompt_tokens,
-                        },
-                    }
-                )
-            else:
-                trajs.append(
-                    {
-                        "response": "",
-                        "response_think": "",
-                        "usage": {
-                            "completion_tokens": 0,
-                            "prompt_tokens": 0,
-                        },
-                    }
-                )
+            trajs.append(_safe_openai_like_to_traj(ret, self.logger))
         return trajs
 
     def is_direct_completion(self) -> bool:
@@ -440,31 +461,7 @@ class DeepSeekChatDecoder(DecoderBase):
             ret = request_chatgpt_engine(
                 config, self.logger, base_url="https://api.deepseek.com"
             )
-            if ret:
-                response_text, response_think = _extract_response_and_think(
-                    ret.choices[0].message
-                )
-                trajs.append(
-                    {
-                        "response": response_text,
-                        "response_think": response_think,
-                        "usage": {
-                            "completion_tokens": ret.usage.completion_tokens,
-                            "prompt_tokens": ret.usage.prompt_tokens,
-                        },
-                    }
-                )
-            else:
-                trajs.append(
-                    {
-                        "response": "",
-                        "response_think": "",
-                        "usage": {
-                            "completion_tokens": 0,
-                            "prompt_tokens": 0,
-                        },
-                    }
-                )
+            trajs.append(_safe_openai_like_to_traj(ret, self.logger))
 
         return trajs
 
