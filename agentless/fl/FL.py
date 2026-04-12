@@ -152,7 +152,7 @@ full_path3/file3.{lang_ext}
 function: my_function2
 ```
 
-Return just the location(s) wrapped with ```.
+**Return just the location(s) wrapped with ```**.
 """
     obtain_relevant_functions_and_vars_from_compressed_files_prompt_more = """
 Please look through the following GitHub Problem Description and the Skeleton of Relevant Files.
@@ -167,7 +167,7 @@ For each location you provide, either give the name of the class, the name of a 
 
 ###
 
-Please provide the complete set of locations as either a class name, a function name, or a variable name.
+Please **provide the complete set of locations as either a class name, a function name, or a variable name**.
 Note that if you include a class, you do not need to list its specific methods.
 You can include either the entire class or don't include the class name and instead include specific methods in the class.
 ### Examples:
@@ -188,7 +188,7 @@ function: MyClass4.my_method_1
 class: MyClass5
 ```
 
-Return just the locations wrapped with ```.
+**Return just the locations wrapped with ```**.
 """
 
     obtain_relevant_functions_and_vars_from_raw_files_prompt = """

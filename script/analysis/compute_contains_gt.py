@@ -43,7 +43,7 @@ def normalize_project_name(raw: str) -> str:
     token = raw.strip().lower()
     if token.startswith("openfoam"):
         return "OpenFOAM"
-    if token.startswith("occt"):
+    if token.startswith("occt") or token.startswith('open-cascade'):
         return "OCCT"
     if token.startswith("mfem"):
         return "mfem"
@@ -56,7 +56,7 @@ def infer_project_from_instance_id(instance_id: str) -> str:
     iid = instance_id.lower()
     if iid.startswith("openfoam-dev-"):
         return "OpenFOAM"
-    if iid.startswith("occt-"):
+    if iid.startswith("occt-") or iid.startswith("open-cascade-sas"):
         return "OCCT"
     if iid.startswith("mfem-"):
         return "mfem"
@@ -341,7 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gt_path",
         type=str,
-        default="data/Def4CAE/filter.json",
+        default="data/Def4CAE/filter_delate_anonFunc.json",
         help="Ground-truth JSON path.",
     )
     parser.add_argument(

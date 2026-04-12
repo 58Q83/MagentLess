@@ -13,7 +13,7 @@ fi
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
 export PROJECT_FILE_LOC="${PROJECT_FILE_LOC:-structure}"
 
-export TARGET_ID=OCCT-2
+export TARGET_ID=mfem-19
 export FOLDER_NAME=ThinkingTest
 export SWEBENCH_LANG=cpp
 export DATASET=local_json
@@ -21,7 +21,7 @@ export SPLIT=test
 export NJ=1
 export FILTER_TOP_N=100
 
-# ./script/localization1.1.sh
+./script/localization1.1.sh
 echo "l1.1 done"
 # ./script/localization1.2.sh
 # echo "l1.2 done"
@@ -29,5 +29,5 @@ echo "l1.1 done"
 # echo "l1.3 done"
 # ./script/localization1.4.sh
 # echo "l1.4 done"
-./script/localization2.1_withoutEmbedding.sh
-echo "l2.1 done"
+# ./script/localization2.1_withoutEmbedding.sh
+# echo "l2.1 done"

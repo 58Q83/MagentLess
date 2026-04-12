@@ -390,13 +390,16 @@ def show_project_structure(structure, spacing=0) -> str:
     pp_string = ""
 
     for key, value in structure.items():
-        if "." in key and not end_with_ext(key.strip()):
-            continue  # skip none python files
-        if "." in key:
+        is_file_node = isinstance(value, dict) and set(value.keys()) == STRUCTURE_KEYS
+
+        if is_file_node:
+            if not end_with_ext(key.strip()):
+                continue
             pp_string += " " * spacing + str(key) + "\n"
-        else:
-            pp_string += " " * spacing + str(key) + "/" + "\n"
-        if "classes" not in value:
+            continue
+
+        pp_string += " " * spacing + str(key) + "/" + "\n"
+        if isinstance(value, dict):
             pp_string += show_project_structure(value, spacing + 4)
 
     return pp_string

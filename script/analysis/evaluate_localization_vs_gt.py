@@ -65,7 +65,7 @@ def normalize_project_name(raw: str) -> str:
     token = raw.strip().lower()
     if token.startswith("openfoam"):
         return "OpenFOAM"
-    if token.startswith("occt"):
+    if token.startswith("occt") or token.startswith("open-cascade-sas"):
         return "OCCT"
     if token.startswith("mfem"):
         return "mfem"
@@ -855,7 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gt_path",
         type=str,
-        default="data/Def4CAE/filter.json",
+        default="data/Def4CAE/filter_delate_anonFunc.json",
         help="Ground-truth JSON path.",
     )
     parser.add_argument(

@@ -488,7 +488,7 @@ def extract_python_blocks(text):
 
 
 def extract_code_blocks(text):
-    pattern = r"```\n(.*?)\n```"
+    pattern = r"```[^\n`]*\n(.*?)\n```"
     matches = re.findall(pattern, text, re.DOTALL)
     if len(matches) == 0:
         if "```" in text:
